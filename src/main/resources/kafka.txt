@@ -1,0 +1,233 @@
+kafka
+
+安装
+简单shell使用
+角色架构介绍
+java-api使用
+读写流程
+存储结构
+常见问题
+
+一、安装(默认已经安装了Zookeeper)
+
+1.版本介绍：kafka总共发布了7个大版本，分别是：0.7.x、0.8.x、0.10.x、0.11.x、1.x以及2.x版本。
+
+2.下载地址：https://kafka.apache.org/downloads
+	文件名介绍：kafka_{scala.version}-{kafka.version}.tgz
+	kafka_2.12-2.0.0.tgz例子：https://archive.apache.org/dist/kafka/2.0.0/kafka_2.12-2.0.0.tgz
+
+3.解压
+	tar -zxvf kafka_2.12-2.0.0.tgz
+	
+4.配置
+	vim server.properties
+	找到 listeners=PLAINTEXT://your.host.name:9092 修改为 listeners=PLAINTEXT://ip:9092
+	zookeeper.connect=localhost:2181 修改为 zookeeper.connect=ip:2181
+	其中ip为部署机器的地址
+	其他的一些配置，参考：https://kafka.apache.org/documentation/#brokerconfigs
+
+5.启动/停止
+	5.1启动流程：
+	先启动Zookeeper；再启动kafka
+	
+	5.2启动Zookeeper命令(找到Zookeeeper安装目录)
+	bin/zkServer.sh start
+	
+	5.3启动kafka命令(找到Kafka安装目录)
+	bin/kafka-server-start.sh config/server.properties
+	
+	5.停止kafka
+	bin/kafka-server-stop.sh config/server.properties
+
+二、简单shell使用(中文文档地址：https://kafka.apachecn.org/)
+
+Topic相关命令
+1.创建Topic(Topic相关的文档：https://kafka.apache.org/20/documentation.html#topicconfigs)
+	bin/kafka-topics.sh --zookeeper localhost:2181 --create --topic testName --partitions 1 --replication-factor 1
+
+2.查询Topic列表
+	bin/kafka-topics.sh --zookeeper localhost:2181 --list
+	
+3.查看Topic详细信息
+	bin/kafka-topics.sh --zookeeper localhost:2181 --topic testName --describe
+	
+4.修改topic
+	bin/kafka-topics.sh --zookeeper localhost:2181 --alter --topic testName --partitions 40
+
+5.删除Topic
+	bin/kafka-topics.sh --zookeeper localhost:2181 --topic testName --delete
+	
+
+producer命令
+6.生产消息
+	bin/kafka-console-producer.sh --broker-list localhost:9092 --topic testName
+
+
+consumer命令(/consumers/<group.id>/<topic>/offsets/<partitionId>，新版：__consumer_offsets)
+7.查看消费者Group列表
+	bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
+	
+8.查看消费者 消费的位置
+	bin/kafka-consumer-groups.sh --zookeeper localhost:2181 --group my-group --describe
+
+9.消费消息(创建消费者时，若不指定group.id,则该消费者属于默认消费组)
+	bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic testName --from-beginning
+	bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic testName --consumer-property group.id=testGroup --from-beginning
+
+三、角色架构介绍
+
+producer
+consumer group
+topic
+broker
+partition(分区leader)
+offset
+coordinator(协调器)
+	消费端：ConsumerCoordinator，负责消费者(客户端)和 broker端交互；包括，一个消费如何加入group和offset提交
+		1.跟新消费者缓存的MetaData
+		2.向组协调器申请加入组
+		3.消费者加入组后的相应处理
+		4.请求离开消费组
+		5.向组协调器提交偏移量
+		6.通过心跳，保持组协调器的连接感知
+		7.被组协调器选为leader的消费者的协调器，负责消费者分区分配。分配结果发送给组协调器。
+		8.非leader的消费者，通过消费者协调器和组协调器同步分配结果。
+		
+	Broker端：GroupCoordinator，负责消费者group成员关联以及offset提交
+
+controller控制器
+	控制器也是一个broker也叫leader broker，除了和其他broker的功能外，还负责分区leader的选举(partition的leader replica)。
+	控制器选举：每个broker启动时候，都会示例化一个KafkaController，并将broker的id注册到Zookeeper。集群在启动过程中，通过选举机制选举出其中一个broker作为leader
+	触发选举：1.集群启动；2.控制器所在的代理发生故障；3.zookeeper心跳感知，控制器与自己的session过期
+	选举过程：
+		1.假设broker1、broker2、broker3同时启动；三个broker从zookeeper获取/controller临时节点信息。/controller存储的是选举出来的leader信息。为了确认是否存在leader
+		2.如果还没有选举出leader，那么此节点是不存在的，返回-1，如果返回的不是-1，而是leader的json数据，那说明leader存在，结束选举。
+		3.三个broker发现返回-1，于是都会向zookeeper进行创建临时节点/controller写入自己的信息，最先写入成功的就成为leader。
+		4.假设broker1写入成功了，那么它就成为leader，而其他broker因为已经存在/controller节点，所以会抛出ZkNodeExistsException，说明leader已经选举成功。
+		此外还有controller_epoch节点，记录leader变更次数，初始值为0，每次变更+1；所有控制器发起请求，都会携带此值。
+		
+副本管理器
+	ISR
+	HW+LEO
+
+
+日志管理器
+
+
+
+
+四、java-api使用
+https://github.com/budingxie/kafka-demo.git
+
+五、生产消费流程(读写流程)
+
+
+
+消息消费流程：
+	消费概念：
+	可以想象成一个 KV 格式的消息，key 就是一个三元组：group.id+topic+分区号，而 value 就是 offset 的值。
+	kafka的每个Consumer实例属于一个consumerGroup(消费组)；
+	在消费是，ConsumerGroup中的每个Consumer独占一个或者多个Partition(分区)；
+	每个ConsumerGroup都有一个Coordinator(协调者) 负责分配Consumer和Partition的对应关系，当Partition或者Consumer发生变更时，会触发rebalance(重新分配)过程，重新分配Consumer于Partition的对应关系；
+
+1.设置必要的配置信息，包括：起始连接的Broker地址，consumer group 的ID，自动提交消费位置的配置和序列化配置。
+2.创建Consumer实例。
+3.订阅Topic：demo_test。
+4.循环拉取消息并打印在控制台上。
+
+消费者入组过程
+ConsumerCoordinator											GroupCoordinator
+1.选择一个负载最小的broker，发送查找组协调器请求
+2.找到所在组协调器后，申请加入，joinGroupRequest		
+															3.构造MemberMetadata，注册到GroupMetadata，有个map维护组成员信息，第一个加入组的为leader，同时选出都支持的分区策略
+4.各成员继续发送SyncGroupRequest。同时leader消费者根据策略做分区分配
+															5.收到leader consumer的分区分配，向该组所有消费者做响应分区分配结果
+															6.将分区与消费者对应关系写入Kafka内部主题(__consumer_offsets)
+
+消费者提交偏移量过程
+消费者消费时，会在本地维护消费到的位置(offset)，就是偏移量，这样下次消费才知道从哪里开始消费。消费者偏移量会定期发送到服务器(为什么)，由GroupCoordinator集中管理。
+
+
+订阅过程：
+	先跟新，订阅状态、元数据中的相关topic的一些数，将元数据状态设置为需要立即跟新。
+拉取消息过程：
+	进行元数据的跟新；
+
+消费者group状态:
+	Empty		组内没有任何成员，但消费者组可能存在已提交的位移数据，而且这些位移尚未过期。
+	Dead		同样是组内没有任何成员，但组的元数据已经在协调者端被移除。协调者保存着当前它注册过的所有group信息，所谓的元数据信息就类似于这个注册信息。
+	PreparingRebalance	消费者group准备开启rebalance，此时所有成员都要重新申请加入消费者group
+	completingRebalance	消费者group所有的成员都已经加入，各个成员正在等待分配方案。该状态在老版本中称为AwaitingSync
+	stable		消费者group的稳定状态。表明rebalance已经完成，group成员能正常消费数据了。
+
+状态转化关系
+Empty ---组信息过期被删除-----> Dead
+Empty ----准备开启Rebalance----> PreparingRebalance
+
+PreparingRebalance ----组内所有成员离组----> Empty
+PreparingRebalance ----有成员入组----> completingRebalance
+PreparingRebalance ----位移、主题分区、Leader 发生变化----> Dead
+
+completingRebalance ----位移、主题分区、Leader 发生变化----> Dead
+completingRebalance ----成员加入或者离开----> PreparingRebalance
+completingRebalance ----leader完成分配----> stable
+
+stable ---位移、主题分区、Leader 发生变化-----> Dead
+stable ----心跳过期/成员离组/新成员加入----> PreparingRebalance
+
+
+消息生产流程：
+1.producer：通过topic、和key或者自己指定分区 计算得到分区，从broker中找到 计算出的分区的leader
+2.将消息发送给该分区leader
+3.leader将消息写入本地log
+4.followers从leader pull消息，写入本地log后向leader发送ACK
+4.leader收到所有ISR的replication 的ACK后，增加HW(high watermark, 最好commit的offset)并向producer发送ACK
+
+用户主线程将消息封装成，ProducerRecord；然后将其序列化之后发送给partitioner，确定分区后同一发送到producer程序中一块内存缓存中，而producer的另外一个工作线程(sender线程)；
+负责实时的从该缓冲区提取准备就绪的消息，封装进一个批次(batch),统一发送给对应的broker。
+
+
+存储结构(查看命令 bin/kafka-run-class.sh kafka.tools.DumpLogSegments --files ./00000000000000000000.log)
+    kafka的消息以日志文件的形式进行存储。不同topic下不同partition的消息是分开存储的。同一个partition的不同副本也是以日志的形式存储。
+    在物理存储上，一个log又分成多个logSegment进行存储，命名：.index/.log/.timeindex；
+    .log存储消息    .index存储消息的索引   .timeIndex，时间索引文件，通过时间戳做索引。三个文件配合使用，快速保存和消费消息。
+    同一个分区数据超过，log.segment.bytes配置的阈值（默认1个G），会创建一个新的logSegment；log.roll.ms或者log.roll.hours设置的时间触发阈值，同样会触发产生新的logSegment
+
+    .index数据内容(索引文件由8个字节的条目组成，4个字节用来存储相对于base offset的偏移量，另外4个字节用来存储position。)
+        相对位移(offset),文件物理位置
+        10,100
+        12,200
+        14,340
+    .log数据内容
+        message 10,100
+        ...
+
+    日志定位
+    1.根据offset定位logSegment(kafka将基础偏移量也就是logsegment的名称作为key存在concurrentSkipListMap中)
+    2.根据logSegment的index文件查找到距离目标offset最近的被索引的offset的position x。
+    3、找到logSegment的.log文件中的x位置，向下逐条查找，找到目标offset的消息。
+    segment file组成：由2大部分组成，分别为index file和data file，此2个文件一一对应，成对出现，后缀”.index”和“.log”分别表示为segment索引文件、数据文件.
+    segment文件命名规则：partition全局的第一个segment从0开始，后续每个segment文件名为上一个segment文件最后一条消息的offset值。数值最大为64位long大小，19位数字字符长度，没有数字用0填充。
+
+    举例：
+    假设同一个分区 目前存储了三个 logsegment；对应目录下的文件：
+    00000000000000000000.index  00000000000000000000.log  00000000000000000000.timeindex
+    00000000000000000010.index  00000000000000000010.log  00000000000000000010.timeindex
+    00000000000000000020.index  00000000000000000020.log  00000000000000000020.timeindex
+
+
+    当收到读请求，查找offset=15的消息；
+    索引文件是内存映射(memory mapped)的，offset查找使用二分查找来查找小于或等于目标offset的最近offset。
+    从00000000000000000010.index中找到offset小于等于15的最大值，offset=14，它对应的position=340
+    从00000000000000000010.log文件中物理位置340，顺序往下扫描文件，找到offset=15的消息内容。
+
+
+
+
+
+
+
+
+
+
+
