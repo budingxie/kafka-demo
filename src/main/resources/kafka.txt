@@ -66,13 +66,13 @@ producer命令
 consumer命令(/consumers/<group.id>/<topic>/offsets/<partitionId>，新版：__consumer_offsets)
 7.查看消费者Group列表
 	bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
-	
-8.查看消费者 消费的位置
-	bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group my-group --describe
 
-9.消费消息(创建消费者时，若不指定group.id,则该消费者属于默认消费组)
+8.消费消息(创建消费者时，若不指定group.id,则该消费者属于默认消费组)
 	bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic testName --from-beginning
 	bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic testName --consumer-property group.id=testGroup --from-beginning
+
+9.查看消费者 消费的位置
+	bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group testGroup --describe
 
 三、角色架构介绍
 
